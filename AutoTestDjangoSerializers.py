@@ -1,15 +1,32 @@
+"""Round-trip test helper for Django REST Framework serializers.
+
+Spins up a fake model instance for each serializer defined in a given
+module, serializes it, and checks that every serialized field matches
+the underlying model field it came from. Surfaces serializers whose
+output has drifted from their model (renamed fields, wrong types,
+stale `source=` mappings, etc.) without having to hand-write a test
+per serializer.
+"""
+
 import inspect
 import json
 from datetime import datetime
+from types import ModuleType
+from typing import Type
 
-import pytest
 from django.db.models import Model
 from faker import Faker
 from rest_framework import serializers
 
 
-@pytest.mark.django_db(transaction=True)
-def get_fake_model_instance(model):
+def get_fake_model_instance(model: Type[Model]) -> Model:
+    """Create (or fetch) a model instance populated with fake field data.
+
+    Recurses into ForeignKey/OneToOneField relations so nested models are
+    fully populated too. Requires an active DB connection - call this from
+    inside a test that has DB access (e.g. via pytest-django's `db` or
+    `transactional_db` fixture).
+    """
     fake = Faker()
     input_fields = {}
 
@@ -34,7 +51,14 @@ def get_fake_model_instance(model):
 
 
 class SerializerTest:
-    def __init__(self, serializer_file):
+    """Compares every serializer in `serializer_file` against a fake model instance.
+
+    Usage:
+        result = SerializerTest(my_app.serializers)
+        assert result.is_serializer_clean(), result.bad_data
+    """
+
+    def __init__(self, serializer_file: ModuleType):
         self.serializer_file = serializer_file
         self.not_tested_dict = {}
         self.model_fields_dict = {}
@@ -42,26 +66,28 @@ class SerializerTest:
         self._bad_data = []
         self.get_serializers_test_dict()
 
-    def is_serializer_clean(self):
+    def is_serializer_clean(self) -> bool:
+        """True if every tested field matched between model and serializer."""
         return self.model_fields_dict == self.serializer_fields_dict
 
     @property
-    def bad_data(self):
-        return json.dumps(self._bad_data, indent=4)
+    def bad_data(self) -> str:
+        """Pretty-printed JSON of every field mismatch found, for test output."""
+        return json.dumps(self._bad_data, indent=4, default=str)
 
     def get_serializers_test_dict(self):
         # Loop through serializers, create related models,
-        # test that each equivalent field in the related models and serializers are eaqual
+        # and check that each field matches between model and serializer.
         for serializer_name, serializer in inspect.getmembers(self.serializer_file):
             if not getattr(serializer, "Meta", None):
-                # If no meta data, do not test serializer
+                # Not a serializer (or has no Meta) - nothing to test.
                 self.not_tested_dict["serializers"] = self.not_tested_dict.get(
                     "serializers", []
                 ) + [serializer_name]
+                continue
 
-            else:
-                model_instance = get_fake_model_instance(model=serializer.Meta.model)
-                serializers_instance = serializer(model_instance)
+            model_instance = get_fake_model_instance(model=serializer.Meta.model)
+            serializers_instance = serializer(model_instance)
 
             # Get related model fields from serializer and test equivalence
             for serializer_field_name in serializers_instance.data:
@@ -115,7 +141,7 @@ class SerializerTest:
                 if isinstance(model_field_value, Model):
                     model_field_value = str(model_field_value)
 
-                # Handle serializers displaying ints a float
+                # Handle serializers displaying ints as float
                 if isinstance(model_field_value, (int, float)):
                     serializer_field_value = float(serializer_field_value)
                     model_field_value = float(model_field_value)
@@ -131,7 +157,7 @@ class SerializerTest:
                 ):
                     try:
                         model_field_value = list(model_field_value.all())
-                    except Exception:
+                    except (AttributeError, TypeError):
                         model_field_value = list(model_field_value)
 
                 self.serializer_fields_dict[
