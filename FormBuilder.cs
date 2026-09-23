@@ -7,7 +7,7 @@ using System.Windows.Forms;
 using System.IO;
 using System.Globalization;
 
-namespace Intranet_Forms.IntranetApp.Bases
+namespace CustomUtilities.Forms
 {
     public partial class FormBuilder : FormBase
     {
@@ -162,12 +162,10 @@ namespace Intranet_Forms.IntranetApp.Bases
         }
         private void SubmitClick(object sender, EventArgs e)
         {
-            //foreach (var f in Fields.Values.ToArray())
-            //    f.isError = !f.isValid(f);
-
+            
             if (Fields.Values.ToArray().Where(x => !x.isValid(x) && x.isRequired).ToArray().Length > 0)
             {
-                MessageBox.Show($"{Fields.Values.ToArray().Where(x => !x.isValid(x)).ToArray()[0].key} is not valid");
+                MessageBox.Show($"{Fields.Values.ToArray().Where(x => !x.isValid(x) && x.isRequired).ToArray()[0].key} is not valid");
                 return;
             }
             if (Castable != null)
@@ -199,12 +197,12 @@ namespace Intranet_Forms.IntranetApp.Bases
                                 Castable.GetType().GetProperty(f.Key).SetValue(Castable, ba);
                                 break;
                             case "Byte[][]":
-                                byte[][] ba2 = new byte[][] { new byte[] { } };
+                                var ba2 = new List<byte[]>();
                                 foreach (var name in f.Value.stringData)
                                 {
-                                    ba2.Append(File.ReadAllBytes(name));
+                                    ba2.Add(File.ReadAllBytes(name));
                                 }
-                                Castable.GetType().GetProperty(f.Key).SetValue(Castable, ba2);
+                                Castable.GetType().GetProperty(f.Key).SetValue(Castable, ba2.ToArray());
                                 break;
                             default:
                                 Castable.GetType().GetProperty(f.Key).SetValue(Castable, f.Value.Text);
